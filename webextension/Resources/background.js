@@ -3,8 +3,10 @@ function proofreadText(selectedText) {
     console.log("Sending text to GPT for proofreading...");
 
     // Get API key from storage
-    chrome.storage.local.get(['openai_api_key'], function (result) {
+    chrome.storage.local.get(['openai_api_key', 'tone_preference'], function (result) {
         const apiKey = result.openai_api_key;
+        const tonePreference = result.tone_preference || 'Neutral';
+        const toneInstruction = tonePreference.toLowerCase();
 
         if (!apiKey) {
             console.error("No API Key found.");
@@ -13,10 +15,12 @@ function proofreadText(selectedText) {
         }
 
         // Prepare the API request payload for GPT-3.5-turbo
+        const systemPrompt = `You are a helpful assistant. Please proofread the following text and respond in a ${toneInstruction} tone.`;
+
         const payload = {
             model: "gpt-3.5-turbo",
             messages: [
-                { role: "system", content: "You are a helpful assistant. Please proofread the following text." },
+                { role: "system", content: systemPrompt },
                 { role: "user", content: selectedText }
             ],
             max_tokens: 500

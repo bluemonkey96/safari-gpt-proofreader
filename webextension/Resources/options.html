@@ -16,7 +16,15 @@
     <h1>OpenAI API Key</h1>
     <label for="apiKey">Enter your OpenAI API Key:</label>
     <input type="text" id="apiKey" placeholder="sk-..." />
-    <button id="saveKey">Save API Key</button>
+
+    <label for="toneSelect">Select response tone:</label>
+    <select id="toneSelect">
+        <option value="Formal">Formal</option>
+        <option value="Neutral" selected>Neutral</option>
+        <option value="Friendly">Friendly</option>
+    </select>
+
+    <button id="saveKey">Save Settings</button>
     <p id="status"></p>
     <script src="options.js"></script>
 </body>
