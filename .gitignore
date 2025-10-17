@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+*.xcscmblueprint
+
+# SwiftPM / Carthage / CocoaPods (om aktuellt)
+.swiftpm/
+Carthage/
+Pods/
+
+# Safari Web Extension build-artifacts (om du har)
+*.appex
+*.xcarchive
