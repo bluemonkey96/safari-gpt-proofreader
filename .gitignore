@@ -16,3 +16,4 @@ Pods/
 # Safari Web Extension build-artifacts (om du har)
 *.appex
 *.xcarchive
+backupo/
