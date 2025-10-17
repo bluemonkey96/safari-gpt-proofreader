@@ -40,6 +40,28 @@ def test_does_not_merge_when_gap_exists():
     assert merged == corrections
 
 
+def test_merges_overlapping_corrections_within_span():
+    corrections = [
+        Correction(start=0, end=5, replacement="hello"),
+        Correction(start=2, end=4, replacement="yy"),
+    ]
+
+    merged = merge_corrections(corrections)
+
+    assert merged == [Correction(start=0, end=5, replacement="heyyo")]
+
+
+def test_merges_when_second_extends_beyond_first():
+    corrections = [
+        Correction(start=0, end=3, replacement="abc"),
+        Correction(start=2, end=5, replacement="XYZ"),
+    ]
+
+    merged = merge_corrections(corrections)
+
+    assert merged == [Correction(start=0, end=5, replacement="abXYZ")]
+
+
 def test_empty_input_returns_empty_list():
     assert merge_corrections([]) == []
 

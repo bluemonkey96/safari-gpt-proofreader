@@ -72,13 +72,29 @@ def merge_corrections(corrections: Iterable[Correction]) -> List[Correction]:
         previous = merged[-1]
         if current.start <= previous.end:
             new_end = max(previous.end, current.end)
-            overlap = max(previous.end - current.start, 0)
-            if overlap:
-                combined_replacement = (
-                    previous.replacement + current.replacement[overlap:]
-                )
+
+            # ``prefix`` retains the portion of the previous replacement that lies
+            # strictly before the start of the current correction.  The slice
+            # length is derived from the distance between the two spans in the
+            # original text but clamped to the available characters to avoid
+            # index errors when dealing with insertions or deletions.
+            prefix_length = max(current.start - previous.start, 0)
+            prefix_length = min(prefix_length, len(previous.replacement))
+            prefix = previous.replacement[:prefix_length]
+
+            # ``suffix`` preserves the tail of the previous replacement that lies
+            # beyond the end of the current correction.  As with ``prefix`` we
+            # clamp to the existing characters because replacements can shorten
+            # the covered span.
+            suffix_span = max(previous.end - current.end, 0)
+            available_for_suffix = max(len(previous.replacement) - prefix_length, 0)
+            suffix_length = min(suffix_span, available_for_suffix)
+            if suffix_length:
+                suffix = previous.replacement[-suffix_length:]
             else:
-                combined_replacement = previous.replacement + current.replacement
+                suffix = ""
+
+            combined_replacement = prefix + current.replacement + suffix
 
             merged[-1] = Correction(previous.start, new_end, combined_replacement)
         else:
