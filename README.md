@@ -1,88 +1,96 @@
-# Safari GPT Proofreader
-
 <p align="center">
   <img src="webextension/Resources/images/logo.png" width="120" alt="Safari GPT Proofreader logo"/>
 </p>
 
-**Safari GPT Proofreader** is a Safari Web Extension that lets you select text on any web page and instantly proofread it with OpenAI GPT from the right‑click menu. It improves grammar, spelling, clarity and tone. The codebase follows the WebExtension standard, so it can also be loaded in Chromium browsers.
+<h1 align="center">Safari GPT Proofreader</h1>
+
+<p align="center">
+  A Safari WebExtension that lets you proofread selected text using OpenAI GPT directly from the right-click menu.
+</p>
+
+<p align="center">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Safari%20%7C%20Chrome%20%7C%20Edge-black">
+  <img alt="Status" src="https://img.shields.io/badge/status-active-brightgreen">
+</p>
 
 ---
 
 ## ✨ Features
-- Right‑click → **Proofread with GPT**
-- Works with `textarea`, `input` and `contenteditable`
-- Local storage of API key (never in source control)
-- Options page + popup UI
-- Safari (Xcode) and Chrome/Edge compatible
+- Right-click → **“Proofread with GPT”**
+- Improves grammar, spelling and clarity
+- Works on inputs, textareas and editable content
+- Saves your OpenAI API key locally
+- Safari compatible via Xcode / WebExtension
+
+---
+
+## 🚀 Installation (Safari via Xcode)
+1. Open the project in **Xcode**
+2. Choose the **Safari Web Extension** target
+3. Press **Run** (**⌘R**)
+4. Enable the extension in Safari preferences
+5. Highlight text → right-click → ✅ Done!
+
+---
+
+## 🔧 Installation (Chrome/Edge Manual)
+1. Go to `chrome://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked**
+4. Select `webextension/Resources`
+5. Enter API key in Options → start proofreading ✅
+
+---
+
+## 🔑 OpenAI API Key Safety
+Your API key is stored **only locally** via `chrome.storage.local`.  
+✔ Not uploaded  
+✔ Not shared  
+✔ Not in git history  
+
+---
 
 ## 📂 Project Structure
 ```
 webextension/
   Info.plist
   SafariWebExtensionHandler.swift
-  safari_gpt_proofreader_Extension.entitlements
   Resources/
     manifest.json
     background.js
     content.js
-    options.html
-    options.js
     popup.html
     popup.js
     popup.css
+    options.html
+    options.js
     images/
-    _locales/
 ```
 
-## 🚀 Getting Started
+---
 
-### Safari (Xcode)
-1. Open the project in **Xcode**.
-2. Select the **Safari Web Extension** target.
-3. Run with **⌘R** and enable the extension in Safari.
-4. Select text on any page → right‑click → *Proofread with GPT*.
+## 🛡 Security Notes
+- `.gitignore` prevents secret files from being committed
+- OpenAI key only used during user requests
+- No analytics/tracking of any kind
 
-### Chrome / Edge (manual load)
-1. Navigate to `chrome://extensions` and enable **Developer mode**.
-2. Click **Load unpacked** and select `webextension/Resources`.
-3. Open **Options** and paste your API key.
+---
 
-## 🔑 OpenAI API Key
-- Never commit real keys to the repo.
-- Enter your key via the **Options** page (`sk-...`).
-- It is stored locally using `chrome.storage.local` (and Safari’s equivalent).
+## 🔜 Roadmap
+- Chrome MV3 packaging
+- Publish to Chrome Web Store
+- Better UI
+- Add grammar/tone options
 
-## 🧠 API Call Example
-```js
-await fetch("https://api.openai.com/v1/chat/completions", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${apiKey}`,
-  },
-  body: JSON.stringify({
-    model: "gpt-3.5-turbo",
-    messages: [
-      { role: "system", content: "You are a concise proofreading assistant." },
-      { role: "user", content: selectedText }
-    ]
-  })
-});
-```
+---
 
-## 🛡️ Security Practices
-- Use **Options UI** + local storage for secrets.
-- Keep `backup/` or local-only folders ignored in `.gitignore`.
-- GitHub **Push Protection** + secret scanning recommended.
+## 🧩 Contribute
+Pull requests welcome!  
+Found an issue? Open one on GitHub. 🚀
 
-## 🗺️ Roadmap
-- Tone presets (formal/casual/friendly)
-- Multilingual proofreading
-- Model selection
-- Chrome Web Store & Safari App Store releases
+---
 
-## 👥 Contributors
-- @bluemonkey96 (maintainer)
-
-## 📄 License
-MIT — free to use and modify.
+## 📜 License
+MIT License © 2025  
+Use freely. Improve. Share.
