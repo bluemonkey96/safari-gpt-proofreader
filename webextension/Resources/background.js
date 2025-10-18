@@ -1,9 +1,58 @@
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
+const REQUEST_TIMEOUT_MS = 15000;
+const BADGE_ERROR_TEXT = '!';
+const BADGE_ERROR_COLOR = '#d93025';
+
+function getBadgeApi() {
+    return (chrome.action && typeof chrome.action.setBadgeText === 'function')
+        ? chrome.action
+        : chrome.browserAction;
+}
+
+function setBadge(text, color) {
+    const badgeApi = getBadgeApi();
+    if (!badgeApi || typeof badgeApi.setBadgeText !== 'function') {
+        return;
+    }
+
+    badgeApi.setBadgeText({ text });
+    if (color && typeof badgeApi.setBadgeBackgroundColor === 'function') {
+        badgeApi.setBadgeBackgroundColor({ color });
+    }
+}
+
+function setStorageErrorBadge() {
+    setBadge(BADGE_ERROR_TEXT, BADGE_ERROR_COLOR);
+}
+
+function clearStorageErrorBadge() {
+    setBadge('');
+}
+
+function safeStorageGet(keys, onSuccess, onError) {
+    chrome.storage.local.get(keys, (result) => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+            console.error('Failed to access extension storage:', error);
+            setStorageErrorBadge();
+            if (typeof onError === 'function') {
+                onError(error);
+            }
+            return;
+        }
+
+        clearStorageErrorBadge();
+        onSuccess(result);
+    });
+}
+
 // Function to proofread selected text using OpenAI GPT-3.5 Turbo
-function proofreadText(selectedText) {
+function proofreadText(selectedText, tabId) {
     console.log("Sending text to GPT for proofreading...");
 
     // Get API key from storage
-    chrome.storage.local.get(['openai_api_key', 'tone_preference'], function (result) {
+    safeStorageGet(['openai_api_key', 'tone_preference'], function (result) {
         const apiKey = result.openai_api_key;
         const tonePreference = result.tone_preference || 'Neutral';
         const toneInstruction = tonePreference.toLowerCase();
@@ -14,46 +63,88 @@ function proofreadText(selectedText) {
             return;
         }
 
-        // Prepare the API request payload for GPT-3.5-turbo
-        const systemPrompt = `You are a helpful assistant. Please proofread the following text and respond in a ${toneInstruction} tone.`;
+        attemptProofread(selectedText, apiKey, toneInstruction)
+            .then(proofreadVersion => {
+                if (proofreadVersion) {
+                    replaceSelectedText(tabId, selectedText, proofreadVersion);
+                }
+            })
+            .catch(error => {
+                console.error("Error in proofreadText function: ", error);
+                const message = error && error.message ? error.message : "Failed to proofread the text. Please try again.";
+                showErrorMessage(message);
+            });
+    }, () => {
+        showErrorMessage('Failed to read your extension settings. Please try again.');
+    });
+}
 
+async function attemptProofread(selectedText, apiKey, toneInstruction, attempt = 0) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
         const payload = {
             model: "gpt-3.5-turbo",
             messages: [
-                { role: "system", content: systemPrompt },
+                {
+                    role: "system",
+                    content: `You are a helpful assistant. Please proofread the following text and respond in a ${toneInstruction} tone.`
+                },
                 { role: "user", content: selectedText }
             ],
             max_tokens: 500
         };
 
-        // Send the API request to OpenAI
-        fetch("https://api.openai.com/v1/chat/completions", {
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${apiKey}`
             },
-            body: JSON.stringify(payload)
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                console.error("Error message captured: ", data.error.message);
-                showErrorMessage(`OpenAI API Error: ${data.error.message}`);
-            } else {
-                // Get the completion (proofread text) from the API response
-                const proofreadText = data.choices[0].message.content;
-                console.log("Proofread text: ", proofreadText);
-
-                // Replace the selected text with the proofread version
-                replaceSelectedText(proofreadText);
-            }
-        })
-        .catch(error => {
-            console.error("Error in proofreadText function: ", error);
-            showErrorMessage("Failed to proofread the text. Please try again.");
+            body: JSON.stringify(payload),
+            signal: controller.signal
         });
-    });
+
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+            let errorMessage = `Request failed with status ${response.status}`;
+            try {
+                const errorBody = await response.json();
+                if (errorBody && errorBody.error && errorBody.error.message) {
+                    errorMessage = `OpenAI API Error: ${errorBody.error.message}`;
+                }
+            } catch (parseError) {
+                // Ignore JSON parse errors and use default message
+            }
+
+            if (response.status === 429 && attempt < MAX_RETRIES) {
+                const backoffTime = RETRY_DELAY_MS * (attempt + 1);
+                console.warn(`Received 429 from OpenAI. Retrying in ${backoffTime}ms (attempt ${attempt + 1}).`);
+                await new Promise(resolve => setTimeout(resolve, backoffTime));
+                return attemptProofread(selectedText, apiKey, toneInstruction, attempt + 1);
+            }
+
+            throw new Error(errorMessage);
+        }
+
+        const data = await response.json();
+        if (!data || !data.choices || !data.choices.length || !data.choices[0].message) {
+            throw new Error("OpenAI response did not contain any completions.");
+        }
+
+        const proofreadText = data.choices[0].message.content;
+        console.log("Proofread text: ", proofreadText);
+        return proofreadText;
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            throw new Error("The proofreading request timed out. Please try again.");
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 // Function to display error messages
@@ -62,9 +153,21 @@ function showErrorMessage(message) {
 }
 
 // Function to replace the selected text with proofread text
-function replaceSelectedText(newText) {
-    chrome.tabs.executeScript({
-        code: `document.activeElement.value = \`${newText}\`;`
+function replaceSelectedText(tabId, originalText, newText) {
+    if (typeof tabId !== 'number') {
+        console.warn('No valid tabId provided for text replacement.');
+        return;
+    }
+
+    chrome.tabs.sendMessage(tabId, {
+        type: 'gptProofreadResult',
+        proofreadText: newText,
+        originalText
+    }, undefined, () => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+            console.warn('Failed to send proofread result to content script:', error.message);
+        }
     });
 }
 
@@ -82,6 +185,18 @@ chrome.contextMenus.onClicked.addListener(function (info, tab) {
     if (info.menuItemId === "proofreadGPT") {
         const selectedText = info.selectionText;
         console.log("Context menu clicked. Selected text: ", selectedText);
-        proofreadText(selectedText);
+        proofreadText(selectedText, tab.id);
+    }
+});
+
+chrome.runtime.onMessage.addListener((request) => {
+    if (!request || request.type !== 'storageBadge') {
+        return;
+    }
+
+    if (request.state === 'error') {
+        setStorageErrorBadge();
+    } else if (request.state === 'clear') {
+        clearStorageErrorBadge();
     }
 });

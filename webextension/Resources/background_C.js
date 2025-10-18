@@ -20,9 +20,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
                 proofreadText(selectedText, result.openai_api_key).then(proofreadVersion => {
                     if (proofreadVersion) {
                         // Replace the selected text with the proofread version
-                        chrome.tabs.executeScript(tab.id, {
-                            code: `document.activeElement.value = document.activeElement.value.replace(${JSON.stringify(selectedText)}, ${JSON.stringify(proofreadVersion)});`
-                        });
+                        replaceSelectedText(tab.id, selectedText, proofreadVersion);
                     } else {
                         // Handle cases where proofreading fails
                         chrome.tabs.sendMessage(tab.id, { message: 'Proofread failed without a specific error.' });
@@ -40,6 +38,24 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         });
     }
 });
+
+function replaceSelectedText(tabId, originalText, newText) {
+    if (typeof tabId !== 'number') {
+        console.warn('No valid tabId provided for text replacement.');
+        return;
+    }
+
+    chrome.tabs.sendMessage(tabId, {
+        type: 'gptProofreadResult',
+        proofreadText: newText,
+        originalText
+    }, undefined, () => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+            console.warn('Failed to send proofread result to content script:', error.message);
+        }
+    });
+}
 
 // Function to send text to GPT for proofreading
 async function proofreadText(selectedText, apiKey) {
