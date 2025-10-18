@@ -1,0 +1,1 @@
+../webextension/Resources/background.js
