@@ -1,0 +1,1 @@
+../webextension/Resources/options.js
