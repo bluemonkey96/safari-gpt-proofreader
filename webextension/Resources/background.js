@@ -48,34 +48,56 @@ function safeStorageGet(keys, onSuccess, onError) {
 }
 
 // Function to proofread selected text using OpenAI GPT-3.5 Turbo
-function proofreadText(selectedText, tabId) {
+function proofreadText(selectedText, tabId, options = {}) {
     console.log("Sending text to GPT for proofreading...");
 
-    // Get API key from storage
-    safeStorageGet(['openai_api_key', 'tone_preference'], function (result) {
-        const apiKey = result.openai_api_key;
-        const tonePreference = result.tone_preference || 'Neutral';
-        const toneInstruction = tonePreference.toLowerCase();
+    const { notifyErrors = true } = options;
 
-        if (!apiKey) {
-            console.error("No API Key found.");
-            showErrorMessage("No API Key found. Please set your API Key in the extension settings.");
-            return;
-        }
+    return new Promise((resolve, reject) => {
+        safeStorageGet(['openai_api_key', 'tone_preference'], function (result) {
+            const apiKey = result.openai_api_key;
+            const tonePreference = result.tone_preference || 'Neutral';
+            const toneInstruction = tonePreference.toLowerCase();
 
-        attemptProofread(selectedText, apiKey, toneInstruction)
-            .then(proofreadVersion => {
-                if (proofreadVersion) {
-                    replaceSelectedText(tabId, selectedText, proofreadVersion);
+            if (!apiKey) {
+                console.error("No API Key found.");
+                const error = new Error("No API Key found. Please set your API Key in the extension settings.");
+                if (notifyErrors) {
+                    showErrorMessage(error.message);
                 }
-            })
-            .catch(error => {
-                console.error("Error in proofreadText function: ", error);
-                const message = error && error.message ? error.message : "Failed to proofread the text. Please try again.";
-                showErrorMessage(message);
-            });
-    }, () => {
-        showErrorMessage('Failed to read your extension settings. Please try again.');
+                reject(error);
+                return;
+            }
+
+            attemptProofread(selectedText, apiKey, toneInstruction)
+                .then(proofreadVersion => {
+                    if (!proofreadVersion) {
+                        const error = new Error('Failed to proofread the text. Please try again.');
+                        if (notifyErrors) {
+                            showErrorMessage(error.message);
+                        }
+                        reject(error);
+                        return;
+                    }
+
+                    replaceSelectedText(tabId, selectedText, proofreadVersion);
+                    resolve(proofreadVersion);
+                })
+                .catch(error => {
+                    console.error("Error in proofreadText function: ", error);
+                    const message = error && error.message ? error.message : "Failed to proofread the text. Please try again.";
+                    if (notifyErrors) {
+                        showErrorMessage(message);
+                    }
+                    reject(error instanceof Error ? error : new Error(message));
+                });
+        }, () => {
+            const error = new Error('Failed to read your extension settings. Please try again.');
+            if (notifyErrors) {
+                showErrorMessage(error.message);
+            }
+            reject(error);
+        });
     });
 }
 
@@ -189,14 +211,46 @@ chrome.contextMenus.onClicked.addListener(function (info, tab) {
     }
 });
 
-chrome.runtime.onMessage.addListener((request) => {
-    if (!request || request.type !== 'storageBadge') {
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (!request) {
         return;
     }
 
-    if (request.state === 'error') {
-        setStorageErrorBadge();
-    } else if (request.state === 'clear') {
-        clearStorageErrorBadge();
+    if (request.type === 'storageBadge') {
+        if (request.state === 'error') {
+            setStorageErrorBadge();
+        } else if (request.state === 'clear') {
+            clearStorageErrorBadge();
+        }
+        return;
+    }
+
+    if (request.type === 'proofreadSelection') {
+        const tabId = typeof request.tabId === 'number' ? request.tabId : (sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : undefined);
+        if (typeof tabId !== 'number') {
+            sendResponse({ ok: false, error: 'Unable to identify the active tab.' });
+            return;
+        }
+
+        const selectedText = typeof request.selectedText === 'string' ? request.selectedText : '';
+        if (!selectedText.trim()) {
+            sendResponse({ ok: false, error: 'Please select some text to proofread.' });
+            return;
+        }
+
+        proofreadText(selectedText, tabId, { notifyErrors: false })
+            .then(() => {
+                if (typeof sendResponse === 'function') {
+                    sendResponse({ ok: true });
+                }
+            })
+            .catch(error => {
+                if (typeof sendResponse === 'function') {
+                    const message = error && error.message ? error.message : 'Failed to proofread the text. Please try again.';
+                    sendResponse({ ok: false, error: message });
+                }
+            });
+
+        return true;
     }
 });
