@@ -63,8 +63,60 @@ function showToast(message) {
     }, TOAST_LIFETIME_MS);
 }
 
+function replaceSelectionWithText(replacementText, originalText) {
+    const activeElement = document.activeElement;
+
+    if (activeElement && typeof activeElement.value === 'string' && typeof activeElement.selectionStart === 'number' && typeof activeElement.selectionEnd === 'number') {
+        const start = activeElement.selectionStart;
+        const end = activeElement.selectionEnd;
+        const selectedValue = activeElement.value.slice(start, end);
+
+        if (!originalText || selectedValue === originalText) {
+            const newValue = `${activeElement.value.slice(0, start)}${replacementText}${activeElement.value.slice(end)}`;
+            activeElement.value = newValue;
+            const caret = start + replacementText.length;
+            activeElement.selectionStart = caret;
+            activeElement.selectionEnd = caret;
+            activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+            activeElement.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        }
+    }
+
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const selectedText = range.toString();
+
+        if (!originalText || selectedText === originalText) {
+            range.deleteContents();
+            const textNode = document.createTextNode(replacementText);
+            range.insertNode(textNode);
+            range.setStartAfter(textNode);
+            range.setEndAfter(textNode);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            return true;
+        }
+    }
+
+    return false;
+}
+
 chrome.runtime.onMessage.addListener((request) => {
-    if (request && request.message) {
+    if (!request) {
+        return;
+    }
+
+    if (request.type === 'gptProofreadResult') {
+        const replaced = replaceSelectionWithText(request.proofreadText, request.originalText);
+        if (!replaced) {
+            showToast('Unable to replace the previously selected text. Please try again.');
+        }
+        return;
+    }
+
+    if (request.message) {
         showToast(request.message);
     }
 });

@@ -89,6 +89,55 @@ const VALID_TONES = new Map([
   ['neutral', 'Neutral'],
   ['friendly', 'Friendly'],
 ]);
+const BADGE_ERROR_TEXT = '!';
+const BADGE_ERROR_COLOR = '#d93025';
+
+function getBadgeApi() {
+  if (chrome.action && typeof chrome.action.setBadgeText === 'function') {
+    return chrome.action;
+  }
+  if (chrome.browserAction && typeof chrome.browserAction.setBadgeText === 'function') {
+    return chrome.browserAction;
+  }
+  return null;
+}
+
+function setBadge(text, color) {
+  const badgeApi = getBadgeApi();
+  if (!badgeApi) {
+    return;
+  }
+
+  badgeApi.setBadgeText({ text });
+  if (color && typeof badgeApi.setBadgeBackgroundColor === 'function') {
+    badgeApi.setBadgeBackgroundColor({ color });
+  }
+}
+
+function setStorageErrorBadge() {
+  setBadge(BADGE_ERROR_TEXT, BADGE_ERROR_COLOR);
+}
+
+function clearStorageErrorBadge() {
+  setBadge('');
+}
+
+function safeStorageGet(keys, onSuccess, onError) {
+  chrome.storage.local.get(keys, (result) => {
+    const error = chrome.runtime.lastError;
+    if (error) {
+      console.error('Failed to access extension storage:', error);
+      setStorageErrorBadge();
+      if (typeof onError === 'function') {
+        onError(error);
+      }
+      return;
+    }
+
+    clearStorageErrorBadge();
+    onSuccess(result);
+  });
+}
 
 if (typeof proofreadText === 'function') {
   const originalShowErrorMessage =
@@ -103,18 +152,13 @@ if (typeof proofreadText === 'function') {
       ? replaceSelectedText
       : () => {};
 
-  self.proofreadText = function mv3ProofreadText(selectedText) {
-    chrome.storage.local.get(
+  self.proofreadText = function mv3ProofreadText(selectedText, tabId) {
+    const targetTabId = typeof tabId === 'number' ? tabId : null;
+    const originalSelection = typeof selectedText === 'string' ? selectedText : '';
+
+    safeStorageGet(
       ['openai_api_key', 'tone_preference'],
       (result) => {
-        if (chrome.runtime.lastError) {
-          console.error('Failed to read extension storage:', chrome.runtime.lastError);
-          originalShowErrorMessage(
-            'Failed to read your extension settings. Please try again.'
-          );
-          return;
-        }
-
         const apiKey = result.openai_api_key;
         const storedTone =
           typeof result.tone_preference === 'string' ? result.tone_preference.trim() : '';
@@ -176,7 +220,7 @@ if (typeof proofreadText === 'function') {
 
             const proofreadResult = data?.choices?.[0]?.message?.content;
             if (proofreadResult) {
-              originalReplaceSelectedText(proofreadResult);
+              originalReplaceSelectedText(targetTabId, originalSelection, proofreadResult);
             } else {
               originalShowErrorMessage(
                 'Failed to retrieve a valid proofread response from OpenAI.'
@@ -191,6 +235,11 @@ if (typeof proofreadText === 'function') {
                 : 'Failed to proofread the text. Please try again.';
             originalShowErrorMessage(fallbackMessage);
           });
+      },
+      () => {
+        originalShowErrorMessage(
+          'Failed to read your extension settings. Please try again.'
+        );
       }
     );
   };
@@ -198,3 +247,15 @@ if (typeof proofreadText === 'function') {
   // Ensure the global binding also points at the MV3-aware implementation.
   proofreadText = self.proofreadText; // eslint-disable-line no-global-assign
 }
+
+chrome.runtime.onMessage.addListener((request) => {
+  if (!request || request.type !== 'storageBadge') {
+    return;
+  }
+
+  if (request.state === 'error') {
+    setStorageErrorBadge();
+  } else if (request.state === 'clear') {
+    clearStorageErrorBadge();
+  }
+});
