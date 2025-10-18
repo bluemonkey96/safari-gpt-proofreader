@@ -144,11 +144,7 @@
         return true;
     }
 
-    function runSelfTest() {
-        if (!selfTestInput) {
-            return;
-        }
-
+    function runLocalReplacementCheck() {
         const sample = selfTestInput.value;
         const misspelt = 'borwn';
         const corrected = 'brown';
@@ -156,7 +152,7 @@
 
         if (startIndex === -1) {
             setStatus(selfTestStatus, 'Sample text missing the expected token.', 'err');
-            return;
+            return false;
         }
 
         selfTestInput.focus();
@@ -165,14 +161,52 @@
 
         if (!replaced) {
             setStatus(selfTestStatus, 'Self-test failed: selection could not be replaced.', 'err');
-            return;
+            selfTestInput.value = sample;
+            return false;
         }
 
         const passed = selfTestInput.value.includes(corrected);
-        if (passed) {
-            setStatus(selfTestStatus, 'Self-test passed: selection replacement succeeded.', 'ok');
-        } else {
+        selfTestInput.value = sample;
+
+        if (!passed) {
             setStatus(selfTestStatus, 'Self-test inconclusive. Please try again.', 'pending');
+            return false;
+        }
+
+        return true;
+    }
+
+    function runSelfTest() {
+        if (!selfTestInput) {
+            return;
+        }
+
+        setStatus(selfTestStatus, 'Running self-test…', 'pending');
+
+        if (!runLocalReplacementCheck()) {
+            return;
+        }
+
+        setStatus(selfTestStatus, 'Checking background response…', 'pending');
+
+        try {
+            chrome.runtime.sendMessage({ type: 'debugSelfTest' }, (response) => {
+                const lastError = chrome.runtime.lastError;
+                if (lastError) {
+                    setStatus(selfTestStatus, `Background unavailable: ${lastError.message}`, 'err');
+                    return;
+                }
+
+                if (response && response.ok) {
+                    setStatus(selfTestStatus, 'Self-test passed: background responded ✓', 'ok');
+                } else if (response && response.error) {
+                    setStatus(selfTestStatus, response.error, 'err');
+                } else {
+                    setStatus(selfTestStatus, 'Self-test failed: no background response.', 'err');
+                }
+            });
+        } catch (error) {
+            setStatus(selfTestStatus, error.message || 'Self-test failed unexpectedly.', 'err');
         }
     }
 

@@ -36,11 +36,39 @@
             border-radius: 5px;
             font-size: 14px;
             width: 100%; /* Full width for the button */
+            transition: background-color 0.15s ease, opacity 0.15s ease;
         }
-        button:disabled { background-color: grey; }
+        button:disabled {
+            background-color: #9aa0a6;
+            cursor: not-allowed;
+            opacity: 0.85;
+        }
         button + button { margin-top: 10px; }
         p { margin-top: 10px; color: green; text-align: center; }
-        #proofreadStatus { min-height: 20px; }
+        #proofreadStatus {
+            min-height: 20px;
+            font-size: 14px;
+            text-align: center;
+            margin-bottom: 0;
+        }
+        #proofreadStatus.status-hint { color: #5f6368; }
+        #proofreadStatus.status-error { color: #d93025; }
+        #proofreadStatus.status-loading { color: #202124; }
+        #proofreadStatus.status-success { color: #137333; }
+        #proofreadStatus .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            margin-right: 8px;
+            border-radius: 50%;
+            border: 2px solid rgba(32, 33, 36, 0.2);
+            border-top-color: rgba(32, 33, 36, 0.65);
+            animation: spin 0.75s linear infinite;
+            vertical-align: -2px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -50,7 +78,7 @@
     <button id="saveKey">Save API Key</button>
     <button id="proofreadSelection">Proofread selection</button>
     <p id="status"></p>
-    <p id="proofreadStatus"></p>
+    <p id="proofreadStatus" role="status" aria-live="polite"></p>
     <script src="popup.js"></script>
 </body>
 </html>

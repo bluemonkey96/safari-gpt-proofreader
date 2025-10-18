@@ -57,7 +57,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const toneSelect = document.getElementById('toneSelect');
     const status = document.getElementById('status');
     const debugToggle = document.getElementById('debugToggle');
-    const debugLink = document.getElementById('debugLink');
 
     const setStatus = (message, isError = false) => {
         status.textContent = message;
@@ -66,9 +65,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const updateDebugUI = (enabled) => {
         debugToggle.checked = Boolean(enabled);
-        if (debugLink) {
-            debugLink.classList.toggle('visible', Boolean(enabled));
-        }
     };
 
     // Load the saved API key when the options page is loaded

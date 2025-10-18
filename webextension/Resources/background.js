@@ -292,7 +292,7 @@ async function proofreadText(selectedText, tabId, options = {}) {
         if (!apiKey) {
             const error = new Error("No API Key found. Please set your API Key in the extension settings.");
             if (notifyErrors) {
-                await awaitShowErrorMessage(error.message);
+                await awaitShowErrorMessage(error.message, tabId);
             }
             recordLastError(error.message);
             throw error;
@@ -302,7 +302,7 @@ async function proofreadText(selectedText, tabId, options = {}) {
         if (!proofreadVersion) {
             const error = new Error('Failed to proofread the text. Please try again.');
             if (notifyErrors) {
-                await awaitShowErrorMessage(error.message);
+                await awaitShowErrorMessage(error.message, tabId);
             }
             recordLastError(error.message);
             throw error;
@@ -312,7 +312,7 @@ async function proofreadText(selectedText, tabId, options = {}) {
         if (!replacementResult.ok) {
             const errorMessage = replacementResult.message || 'Unable to update the selected text.';
             if (notifyErrors) {
-                await awaitShowErrorMessage(errorMessage);
+                await awaitShowErrorMessage(errorMessage, tabId);
             }
             recordLastError(errorMessage);
             throw new Error(errorMessage);
@@ -324,7 +324,7 @@ async function proofreadText(selectedText, tabId, options = {}) {
         const message = error && error.message ? error.message : 'Failed to proofread the text. Please try again.';
         debugLog('proofread:error', { tabId, message });
         if (notifyErrors) {
-            await awaitShowErrorMessage(message);
+            await awaitShowErrorMessage(message, tabId);
         }
         throw error instanceof Error ? error : new Error(message);
     }
@@ -404,8 +404,16 @@ function showErrorMessage(message) {
     alert(message);
 }
 
-async function awaitShowErrorMessage(message) {
-    debugLog('toast:fallback', { message });
+async function awaitShowErrorMessage(message, preferredTabId) {
+    debugLog('toast:fallback', { message, preferredTabId });
+
+    if (typeof preferredTabId === 'number') {
+        const response = await sendToTabSafe(preferredTabId, { message });
+        if (response.ok) {
+            return;
+        }
+    }
+
     const activeTab = await getActiveTabSafe();
     if (activeTab && typeof activeTab.id === 'number') {
         const response = await sendToTabSafe(activeTab.id, { message });
@@ -456,7 +464,7 @@ chrome.runtime.onInstalled.addListener(function () {
 });
 
 // Listener for context menu clicks
-chrome.contextMenus.onClicked.addListener(function (info, tab) {
+chrome.contextMenus.onClicked.addListener(async function (info, tab) {
     if (info.menuItemId !== "proofreadGPT") {
         return;
     }
@@ -465,18 +473,19 @@ chrome.contextMenus.onClicked.addListener(function (info, tab) {
     const tabId = tab && typeof tab.id === 'number' ? tab.id : undefined;
 
     if (!selectedText.trim()) {
-        awaitShowErrorMessage('Please select some text to proofread.');
+        await awaitShowErrorMessage('Please select some text to proofread.', tabId);
         return;
     }
 
     debugLog('contextMenu:invoke', { tabId });
 
-    proofreadText(selectedText, tabId, { notifyErrors: false, source: 'context-menu' })
-        .catch(error => {
-            const message = error && error.message ? error.message : 'Failed to proofread the text. Please try again.';
-            console.error('Context menu proofreading failed:', error);
-            awaitShowErrorMessage(message);
-        });
+    try {
+        await proofreadText(selectedText, tabId, { notifyErrors: false, source: 'context-menu' });
+    } catch (error) {
+        const message = error && error.message ? error.message : 'Failed to proofread the text. Please try again.';
+        console.error('Context menu proofreading failed:', error);
+        await awaitShowErrorMessage(message, tabId);
+    }
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -525,6 +534,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'gptProofreaderPing') {
         if (typeof sendResponse === 'function') {
             sendResponse({ ok: true });
+        }
+        return;
+    }
+
+    if (request.type === 'debugSelfTest') {
+        if (typeof sendResponse === 'function') {
+            sendResponse({ ok: true, timestamp: Date.now() });
         }
         return;
     }

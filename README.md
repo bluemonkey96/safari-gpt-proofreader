@@ -25,21 +25,19 @@
 
 ---
 
-## 🚀 Installation (Safari via Xcode)
-1. Open the project in **Xcode**
-2. Choose the **Safari Web Extension** target
-3. Press **Run** (**⌘R**)
-4. Enable the extension in Safari preferences
-5. Highlight text → right-click → ✅ Done!
+## 📦 Install
+### Chrome (MV3)
+1. Open `chrome://extensions` and enable **Developer mode**.
+2. Click **Load unpacked** and choose the `chrome/` directory from this repository.
+3. Open the popup, paste your OpenAI API key, and click **Save API Key**.
+4. (Optional) Visit the options page to set your preferred tone.
 
----
-
-## 🔧 Installation (Chrome/Edge Manual)
-1. Go to `chrome://extensions`
-2. Enable **Developer mode**
-3. Click **Load unpacked**
-4. Select `webextension/Resources`
-5. Enter API key in Options → start proofreading ✅
+### Safari
+1. Open the project in **Xcode**.
+2. Select the **Safari Web Extension** target.
+3. Press **Run** (**⌘R**) to build and install the temporary app.
+4. In Safari, open **Preferences → Extensions** and enable *Safari GPT Proofreader*.
+5. Open the extension options page to save your API key before testing.
 
 ---
 
@@ -70,18 +68,45 @@ webextension/
 
 ---
 
+## 🧳 Packaging
+### Chrome
+1. Run `./scripts/package_chrome.sh` from the repository root.
+2. Load `dist/chrome/unpacked` for local testing or distribute `dist/chrome/safari-gpt-proofreader-chrome.zip`.
+
+### Safari (Xcode)
+1. In Xcode select the **Safari Web Extension** target.
+2. Choose **Product → Archive** to produce a signed build.
+3. Use the Organizer to export the app bundle, install it, then enable the extension from **Preferences → Extensions**.
+
+---
+
 ## 🛠 Quick debug
-- Open **Options** from the extension menu and enable **Debug logging**.
-- A **Debug tools** link appears – open it to view the storage snapshot, last recorded error, and run the self-test.
+- Open the options page and enable **Debug logging**.
+- Note the extension ID from `chrome://extensions` (or Safari’s Develop → Show Extension Builder) and open `debug.html` manually, e.g. `chrome-extension://<id>/debug.html`, to inspect storage, last error, and run the round-trip self-test.
 - Badge text **ERR** with a title ending in “No content script on this page” means the active tab cannot be updated (e.g., PDF viewer or restricted page). Return to a normal webpage and try again.
 
 ---
 
-## ✅ Manual test checklist
-- Popup proofreading: select text, trigger **Proofread selection**, wait for status, and confirm only the selection changes.
-- Context menu proofreading: capture text from one tab, switch tabs while it processes, and verify the result returns to the original tab.
-- Restricted-page fallback: open a PDF/restricted page, trigger proofreading, and confirm the badge shows **ERR** with the fallback title.
-- Storage resilience: disable network or clear storage to confirm option save/load errors show a toast and the badge marks storage failures.
+## 🧪 Test
+### Chrome
+- Select text on a regular page and use the popup **Proofread selection** button. Watch the status line for the spinner, then confirm only the highlighted text is replaced.
+- Right-click the same selection, choose **Proofread with GPT**, switch to another tab, and verify the correction lands back in the original tab.
+- Visit a restricted page (e.g., Chrome Web Store or a PDF), trigger proofreading, and confirm the badge shows **ERR** with the fallback title.
+
+### Safari
+- Enable the extension in **Preferences → Extensions**, open the options page, and save your API key.
+- Use the popup on a normal webpage to proofread a highlighted selection.
+- Trigger the context menu flow and confirm results return to the originating tab or surface the badge fallback on restricted pages.
+
+---
+
+## ❓ Troubleshooting
+| Symptom | Fix |
+| --- | --- |
+| Popup says “Please enter a valid API Key.” | Open the popup or options page and save a valid OpenAI API key. |
+| Toast reports that no text was selected. | Highlight the text again and make sure it contains more than whitespace before running the command. |
+| Badge shows **ERR** with “No content script on this page.” | The page blocks scripts (e.g., Chrome Web Store, PDFs). Switch to a standard webpage and retry. |
+| Badge shows **!** and storage errors appear. | Reopen the options page, resave your settings, and use `debug.html` to confirm storage access succeeds. |
 
 ---
 
@@ -93,7 +118,6 @@ webextension/
 ---
 
 ## 🔜 Roadmap
-- Chrome MV3 packaging
 - Publish to Chrome Web Store
 - Better UI
 - Add grammar/tone options

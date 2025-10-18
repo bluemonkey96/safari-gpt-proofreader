@@ -58,24 +58,102 @@ document.addEventListener('DOMContentLoaded', function () {
     const proofreadButton = document.getElementById('proofreadSelection');
     const proofreadStatus = document.getElementById('proofreadStatus');
 
+    let statusState = 'idle';
+    let resetStatusTimeoutId = null;
+    let isProofreading = false;
+    let selectionMonitorId = null;
+    let lastSelectionHadContent = false;
+
+    if (proofreadButton) {
+        proofreadButton.disabled = true;
+    }
+
     const setStatus = (message, isError = false) => {
         status.textContent = message;
         status.style.color = isError ? '#d93025' : 'green';
     };
 
+    const clearProofreadStatus = () => {
+        if (resetStatusTimeoutId) {
+            clearTimeout(resetStatusTimeoutId);
+            resetStatusTimeoutId = null;
+        }
+        if (proofreadStatus) {
+            proofreadStatus.textContent = '';
+            proofreadStatus.className = '';
+        }
+        statusState = 'idle';
+    };
+
     const setProofreadStatus = (message, state = 'success') => {
-        proofreadStatus.textContent = message;
-        if (state === 'error') {
-            proofreadStatus.style.color = '#d93025';
-        } else if (state === 'loading') {
-            proofreadStatus.style.color = '#202124';
+        if (!proofreadStatus) {
+            return;
+        }
+
+        if (resetStatusTimeoutId) {
+            clearTimeout(resetStatusTimeoutId);
+            resetStatusTimeoutId = null;
+        }
+
+        statusState = state;
+        proofreadStatus.textContent = '';
+        proofreadStatus.className = '';
+
+        const statusClassMap = {
+            success: 'status-success',
+            error: 'status-error',
+            loading: 'status-loading',
+            hint: 'status-hint'
+        };
+
+        const className = statusClassMap[state];
+        if (className) {
+            proofreadStatus.classList.add(className);
+        }
+
+        if (!message) {
+            if (state === 'idle') {
+                clearProofreadStatus();
+            }
+            return;
+        }
+
+        if (state === 'loading') {
+            const spinner = document.createElement('span');
+            spinner.className = 'spinner';
+            spinner.setAttribute('aria-hidden', 'true');
+            proofreadStatus.appendChild(spinner);
+            proofreadStatus.appendChild(document.createTextNode(message));
         } else {
-            proofreadStatus.style.color = 'green';
+            proofreadStatus.textContent = message;
+        }
+
+        if (state === 'success') {
+            resetStatusTimeoutId = window.setTimeout(() => {
+                if (statusState === 'success') {
+                    clearProofreadStatus();
+                }
+            }, 2500);
         }
     };
 
-    const clearProofreadStatus = () => {
-        proofreadStatus.textContent = '';
+    const setHintIfIdle = (message) => {
+        if (statusState === 'idle' || statusState === 'hint') {
+            setProofreadStatus(message, 'hint');
+        }
+    };
+
+    const applyButtonAvailability = () => {
+        if (!proofreadButton) {
+            return;
+        }
+
+        if (isProofreading) {
+            proofreadButton.disabled = true;
+            return;
+        }
+
+        proofreadButton.disabled = !lastSelectionHadContent;
     };
 
     const getActiveTab = () => new Promise((resolve, reject) => {
@@ -96,20 +174,30 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    const requestSelectionFromTab = (tabId) => new Promise((resolve, reject) => {
-        chrome.tabs.sendMessage(tabId, { type: 'gptProofreadSelectionRequest' }, (response) => {
+    const requestSelectionFromTab = (tabId, options = {}) => new Promise((resolve, reject) => {
+        const { silent = false, notifyOnEmpty = false } = options;
+        const message = { type: 'gptProofreadSelectionRequest' };
+        if (notifyOnEmpty) {
+            message.notifyOnEmpty = true;
+        }
+
+        chrome.tabs.sendMessage(tabId, message, (response) => {
             const error = chrome.runtime.lastError;
             if (error) {
-                reject(new Error('Unable to read the selected text on this page.')); 
+                if (silent) {
+                    resolve({ text: '', error: new Error('Unable to read the selected text on this page.') });
+                    return;
+                }
+                reject(new Error('Unable to read the selected text on this page.'));
                 return;
             }
 
             if (!response || typeof response.text !== 'string') {
-                resolve('');
+                resolve({ text: '' });
                 return;
             }
 
-            resolve(response.text);
+            resolve({ text: response.text });
         });
     });
 
@@ -138,6 +226,38 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    const updateSelectionState = async (options = {}) => {
+        const { showHint = false } = options;
+
+        if (!proofreadButton) {
+            return;
+        }
+
+        try {
+            const tab = await getActiveTab();
+            const result = await requestSelectionFromTab(tab.id, { silent: true });
+            lastSelectionHadContent = Boolean(result.text && result.text.trim());
+
+            applyButtonAvailability();
+
+            if (!lastSelectionHadContent && showHint) {
+                if (result.error) {
+                    setHintIfIdle(result.error.message);
+                } else {
+                    setHintIfIdle('Select text in the page to enable proofreading.');
+                }
+            } else if (lastSelectionHadContent && statusState === 'hint') {
+                clearProofreadStatus();
+            }
+        } catch (error) {
+            lastSelectionHadContent = false;
+            applyButtonAvailability();
+            if (showHint) {
+                setProofreadStatus(error.message || 'Unable to locate an active tab.', 'error');
+            }
+        }
+    };
+
     safeStorageGet(['openai_api_key'], (result) => {
         if (result.openai_api_key) {
             apiKeyInput.value = result.openai_api_key;
@@ -163,29 +283,42 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
+    updateSelectionState({ showHint: true });
+    selectionMonitorId = window.setInterval(() => {
+        updateSelectionState();
+    }, 1200);
+
+    window.addEventListener('unload', () => {
+        if (selectionMonitorId) {
+            clearInterval(selectionMonitorId);
+            selectionMonitorId = null;
+        }
+    });
+
     proofreadButton.addEventListener('click', async () => {
-        proofreadButton.disabled = true;
+        if (isProofreading) {
+            return;
+        }
+
+        isProofreading = true;
+        applyButtonAvailability();
         setProofreadStatus('Proofreading selection…', 'loading');
 
         try {
             const tab = await getActiveTab();
-            const selection = await requestSelectionFromTab(tab.id);
+            const { text: selection } = await requestSelectionFromTab(tab.id, { notifyOnEmpty: true });
 
             if (!selection || !selection.trim()) {
                 throw new Error('Please select some text to proofread before trying again.');
             }
 
             await requestProofread(tab.id, selection);
-            setProofreadStatus('Proofreading complete!');
-            setTimeout(() => {
-                if (proofreadStatus.textContent === 'Proofreading complete!') {
-                    clearProofreadStatus();
-                }
-            }, 2500);
+            setProofreadStatus('Proofreading complete!', 'success');
         } catch (error) {
             setProofreadStatus(error.message || 'Failed to proofread the selected text.', 'error');
         } finally {
-            proofreadButton.disabled = false;
+            isProofreading = false;
+            await updateSelectionState({ showHint: true });
         }
     });
 });
