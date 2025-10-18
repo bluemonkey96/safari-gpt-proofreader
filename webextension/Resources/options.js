@@ -56,14 +56,23 @@ document.addEventListener('DOMContentLoaded', function() {
     const apiKeyInput = document.getElementById('apiKey');
     const toneSelect = document.getElementById('toneSelect');
     const status = document.getElementById('status');
+    const debugToggle = document.getElementById('debugToggle');
+    const debugLink = document.getElementById('debugLink');
 
     const setStatus = (message, isError = false) => {
         status.textContent = message;
         status.style.color = isError ? '#d93025' : 'green';
     };
 
+    const updateDebugUI = (enabled) => {
+        debugToggle.checked = Boolean(enabled);
+        if (debugLink) {
+            debugLink.classList.toggle('visible', Boolean(enabled));
+        }
+    };
+
     // Load the saved API key when the options page is loaded
-    safeStorageGet(['openai_api_key', 'tone_preference'], function(result) {
+    safeStorageGet(['openai_api_key', 'tone_preference', 'debug_enabled'], function(result) {
         if (result.openai_api_key) {
             apiKeyInput.value = result.openai_api_key;
         }
@@ -71,6 +80,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (result.tone_preference) {
             toneSelect.value = result.tone_preference;
         }
+
+        updateDebugUI(result.debug_enabled);
     }, () => {
         setStatus('Failed to load saved settings. Please try again.', true);
     });
@@ -92,5 +103,19 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             setStatus('Please enter a valid API Key.', true);
         }
+    });
+
+    debugToggle.addEventListener('change', function() {
+        const enabled = debugToggle.checked;
+        updateDebugUI(enabled);
+        safeStorageSet({ debug_enabled: enabled }, () => {
+            setStatus(enabled ? 'Debug logging enabled.' : 'Debug logging disabled.', false);
+            setTimeout(() => {
+                status.textContent = '';
+            }, 2000);
+        }, () => {
+            setStatus('Failed to update debug setting. Please try again.', true);
+            updateDebugUI(!enabled);
+        });
     });
 });

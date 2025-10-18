@@ -70,6 +70,21 @@ webextension/
 
 ---
 
+## 🛠 Quick debug
+- Open **Options** from the extension menu and enable **Debug logging**.
+- A **Debug tools** link appears – open it to view the storage snapshot, last recorded error, and run the self-test.
+- Badge text **ERR** with a title ending in “No content script on this page” means the active tab cannot be updated (e.g., PDF viewer or restricted page). Return to a normal webpage and try again.
+
+---
+
+## ✅ Manual test checklist
+- Popup proofreading: select text, trigger **Proofread selection**, wait for status, and confirm only the selection changes.
+- Context menu proofreading: capture text from one tab, switch tabs while it processes, and verify the result returns to the original tab.
+- Restricted-page fallback: open a PDF/restricted page, trigger proofreading, and confirm the badge shows **ERR** with the fallback title.
+- Storage resilience: disable network or clear storage to confirm option save/load errors show a toast and the badge marks storage failures.
+
+---
+
 ## 🛡 Security Notes
 - `.gitignore` prevents secret files from being committed
 - OpenAI key only used during user requests

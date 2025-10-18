@@ -1,6 +1,44 @@
 const TOAST_CONTAINER_ID = "gpt-proofreader-toast-container";
 const TOAST_LIFETIME_MS = 4000;
 
+let debugEnabled = false;
+
+function debugLog(event, payload = {}) {
+    if (debugEnabled) {
+        try {
+            console.debug('[proofreader:content]', event, payload);
+        } catch (error) {
+            // Ignore logging failures.
+        }
+    }
+}
+
+function readDebugFlag() {
+    try {
+        chrome.storage.local.get(['debug_enabled'], (result) => {
+            if (chrome.runtime.lastError) {
+                debugLog('storage:get:error', { message: chrome.runtime.lastError.message });
+                return;
+            }
+            debugEnabled = Boolean(result && result.debug_enabled);
+            debugLog('debug:flag:update', { enabled: debugEnabled });
+        });
+    } catch (error) {
+        debugLog('storage:get:exception', { message: error.message });
+    }
+}
+
+readDebugFlag();
+
+if (chrome.storage && typeof chrome.storage.onChanged?.addListener === 'function') {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === 'local' && Object.prototype.hasOwnProperty.call(changes, 'debug_enabled')) {
+            debugEnabled = Boolean(changes.debug_enabled.newValue);
+            debugLog('debug:flag:update', { enabled: debugEnabled });
+        }
+    });
+}
+
 function ensureToastContainer() {
     let container = document.getElementById(TOAST_CONTAINER_ID);
     if (!container) {
@@ -24,6 +62,7 @@ function ensureToastContainer() {
 }
 
 function showToast(message) {
+    debugLog('toast:show', { message });
     if (!document || !document.body) {
         window.alert(message);
         return;
@@ -98,6 +137,12 @@ function getCurrentSelectionText() {
 function replaceSelectionWithText(replacementText, originalText) {
     const activeElement = document.activeElement;
 
+    debugLog('replace:start', {
+        hasActiveElement: Boolean(activeElement),
+        originalLength: originalText ? originalText.length : 0,
+        replacementLength: replacementText ? replacementText.length : 0
+    });
+
     if (activeElement && typeof activeElement.value === 'string' && typeof activeElement.selectionStart === 'number' && typeof activeElement.selectionEnd === 'number') {
         const start = activeElement.selectionStart;
         const end = activeElement.selectionEnd;
@@ -111,6 +156,7 @@ function replaceSelectionWithText(replacementText, originalText) {
             activeElement.selectionEnd = caret;
             activeElement.dispatchEvent(new Event('input', { bubbles: true }));
             activeElement.dispatchEvent(new Event('change', { bubbles: true }));
+            debugLog('replace:inputElement:ok', {});
             return true;
         }
     }
@@ -128,10 +174,12 @@ function replaceSelectionWithText(replacementText, originalText) {
             range.setEndAfter(textNode);
             selection.removeAllRanges();
             selection.addRange(range);
+            debugLog('replace:contentEditable:ok', {});
             return true;
         }
     }
 
+    debugLog('replace:failed');
     return false;
 }
 
@@ -144,6 +192,9 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         const replaced = replaceSelectionWithText(request.proofreadText, request.originalText);
         if (!replaced) {
             showToast('Unable to replace the previously selected text. Please try again.');
+            debugLog('proofread:apply:failed', {});
+        } else {
+            debugLog('proofread:apply:ok', { length: request.proofreadText ? request.proofreadText.length : 0 });
         }
         return;
     }
@@ -151,6 +202,14 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.type === 'gptProofreadSelectionRequest') {
         const text = getCurrentSelectionText();
         sendResponse({ text });
+        return;
+    }
+
+    if (request.type === 'gptProofreaderPing') {
+        if (typeof sendResponse === 'function') {
+            sendResponse({ ok: true });
+        }
+        debugLog('ping:received');
         return;
     }
 
