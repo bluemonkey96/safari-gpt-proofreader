@@ -25,7 +25,30 @@
     </select>
 
     <button id="saveKey">Save Settings</button>
+    <label class="debug-toggle">
+        <input type="checkbox" id="debugToggle" /> Enable debug logging
+    </label>
+    <a id="debugLink" class="debug-link" href="debug.html" target="_blank">Debug tools</a>
     <p id="status"></p>
+
+    <style>
+        .debug-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 16px;
+            font-weight: normal;
+        }
+
+        .debug-link {
+            display: none;
+            margin-top: 12px;
+        }
+
+        .debug-link.visible {
+            display: inline-block;
+        }
+    </style>
     <script src="options.js"></script>
 </body>
 </html>

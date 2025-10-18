@@ -1,8 +1,9 @@
-const BADGE_FALLBACK_TEXT = '!';
+const BADGE_FALLBACK_TEXT = 'ERR';
 const BADGE_FALLBACK_COLOR = '#d93025';
 const BADGE_FALLBACK_TIMEOUT_MS = 8000;
-const BADGE_FALLBACK_TITLE_PREFIX = 'Proofreader error – ';
+const BADGE_FALLBACK_TITLE_PREFIX = 'GPT Proofreader – ';
 const DEFAULT_ACTION_TITLE = 'GPT Proofreader';
+const BADGE_FALLBACK_TITLE = 'No content script on this page';
 
 let badgeFallbackTimeoutId;
 
@@ -25,7 +26,7 @@ function scheduleBadgeClear(actionApi) {
   }, BADGE_FALLBACK_TIMEOUT_MS);
 }
 
-function showBadgeFallback(message) {
+function showBadgeFallback(message = BADGE_FALLBACK_TITLE) {
   const actionApi = getActionApi();
   if (!actionApi) {
     console.warn('No browser action API available for badge fallback.');
@@ -43,34 +44,35 @@ function showBadgeFallback(message) {
   }
 
   scheduleBadgeClear(actionApi);
-}
 
-// Polyfill alert for MV3 service worker context by messaging the active tab content script,
-// falling back to an action badge/title if no receiver is available.
-if (typeof self.alert !== 'function') {
-  self.alert = function (message) {
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-      if (chrome.runtime.lastError) {
-        console.error('Failed to query active tab for alert:', chrome.runtime.lastError);
-        showBadgeFallback(message);
-        return;
-      }
-
-      const tab = Array.isArray(tabs) ? tabs[0] : null;
-      if (tab && typeof tab.id === 'number') {
-        chrome.tabs.sendMessage(tab.id, { message }, () => {
-          if (chrome.runtime.lastError) {
-            console.warn('Falling back to action badge for alert:', chrome.runtime.lastError);
-            showBadgeFallback(message);
-          }
-        });
-        return;
-      }
-
-      showBadgeFallback(message);
-    });
-  };
+  if (typeof recordLastError === 'function') {
+    recordLastError(fallbackMessage);
+  }
 }
 
 // Load the shared background logic so MV3 reuses the MV2 implementation.
 importScripts('./background.js');
+
+// Polyfill alert for MV3 service worker context by messaging the active tab content script,
+// falling back to an action badge/title if no receiver is available.
+if (typeof self.alert !== 'function') {
+  self.alert = async function (message) {
+    const fallbackMessage = message || BADGE_FALLBACK_TITLE;
+
+    if (typeof getActiveTabSafe === 'function' && typeof sendToTabSafe === 'function') {
+      try {
+        const tab = await getActiveTabSafe();
+        if (tab && typeof tab.id === 'number') {
+          const result = await sendToTabSafe(tab.id, { message: String(message) }, { fallbackTitle: BADGE_FALLBACK_TITLE });
+          if (result.ok) {
+            return;
+          }
+        }
+      } catch (error) {
+        console.warn('Alert polyfill failed to reach active tab:', error);
+      }
+    }
+
+    showBadgeFallback(fallbackMessage);
+  };
+}

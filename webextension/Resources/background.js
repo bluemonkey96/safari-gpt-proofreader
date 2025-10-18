@@ -3,6 +3,24 @@ const RETRY_DELAY_MS = 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 const BADGE_ERROR_TEXT = '!';
 const BADGE_ERROR_COLOR = '#d93025';
+const FALLBACK_BADGE_TEXT = 'ERR';
+const FALLBACK_BADGE_COLOR = '#d93025';
+const FALLBACK_BADGE_TITLE = 'No content script on this page';
+const FALLBACK_BADGE_TIMEOUT_MS = 8000;
+const DEFAULT_ACTION_TITLE = 'GPT Proofreader';
+
+let debugEnabled = false;
+let badgeFallbackTimeoutId;
+
+function debugLog(event, payload = {}) {
+    if (debugEnabled) {
+        try {
+            console.debug('[proofreader]', event, payload);
+        } catch (error) {
+            // Ignore logging failures.
+        }
+    }
+}
 
 function getBadgeApi() {
     return (chrome.action && typeof chrome.action.setBadgeText === 'function')
@@ -10,95 +28,306 @@ function getBadgeApi() {
         : chrome.browserAction;
 }
 
+function setActionTitle(title) {
+    const badgeApi = getBadgeApi();
+    if (badgeApi && typeof badgeApi.setTitle === 'function') {
+        try {
+            badgeApi.setTitle({ title });
+        } catch (error) {
+            debugLog('action.setTitle:error', { message: error.message });
+        }
+    }
+}
+
 function setBadge(text, color) {
     const badgeApi = getBadgeApi();
     if (!badgeApi || typeof badgeApi.setBadgeText !== 'function') {
+        debugLog('badge:missingApi');
         return;
     }
 
-    badgeApi.setBadgeText({ text });
-    if (color && typeof badgeApi.setBadgeBackgroundColor === 'function') {
-        badgeApi.setBadgeBackgroundColor({ color });
+    try {
+        badgeApi.setBadgeText({ text });
+        if (color && typeof badgeApi.setBadgeBackgroundColor === 'function') {
+            badgeApi.setBadgeBackgroundColor({ color });
+        }
+    } catch (error) {
+        debugLog('badge:set:error', { message: error.message });
+    }
+}
+
+function scheduleBadgeFallbackClear() {
+    const badgeApi = getBadgeApi();
+    if (!badgeApi) {
+        return;
+    }
+
+    if (badgeFallbackTimeoutId) {
+        clearTimeout(badgeFallbackTimeoutId);
+    }
+
+    badgeFallbackTimeoutId = setTimeout(() => {
+        try {
+            badgeApi.setBadgeText({ text: '' });
+            if (typeof badgeApi.setTitle === 'function') {
+                badgeApi.setTitle({ title: DEFAULT_ACTION_TITLE });
+            }
+        } catch (error) {
+            debugLog('badge:clear:error', { message: error.message });
+        }
+    }, FALLBACK_BADGE_TIMEOUT_MS);
+}
+
+function showNoContentScriptFallback(message = FALLBACK_BADGE_TITLE) {
+    setBadge(FALLBACK_BADGE_TEXT, FALLBACK_BADGE_COLOR);
+    setActionTitle(`${DEFAULT_ACTION_TITLE} – ${message}`);
+    scheduleBadgeFallbackClear();
+    recordLastError(message);
+}
+
+function clearActionBadgeFallback() {
+    const badgeApi = getBadgeApi();
+    if (!badgeApi) {
+        return;
+    }
+
+    try {
+        badgeApi.setBadgeText({ text: '' });
+        if (typeof badgeApi.setTitle === 'function') {
+            badgeApi.setTitle({ title: DEFAULT_ACTION_TITLE });
+        }
+    } catch (error) {
+        debugLog('badge:clearImmediate:error', { message: error.message });
     }
 }
 
 function setStorageErrorBadge() {
     setBadge(BADGE_ERROR_TEXT, BADGE_ERROR_COLOR);
+    setActionTitle(`${DEFAULT_ACTION_TITLE} – Storage issue`);
 }
 
 function clearStorageErrorBadge() {
     setBadge('');
+    setActionTitle(DEFAULT_ACTION_TITLE);
+}
+
+function recordLastError(message) {
+    const payload = { last_error_message: message, last_error_at: Date.now() };
+    try {
+        chrome.storage.local.set(payload, () => {
+            const error = chrome.runtime.lastError;
+            if (error) {
+                debugLog('storage:setLastError:error', { message: error.message });
+            }
+        });
+    } catch (error) {
+        debugLog('storage:setLastError:exception', { message: error.message });
+    }
 }
 
 function safeStorageGet(keys, onSuccess, onError) {
-    chrome.storage.local.get(keys, (result) => {
-        const error = chrome.runtime.lastError;
-        if (error) {
-            console.error('Failed to access extension storage:', error);
-            setStorageErrorBadge();
-            if (typeof onError === 'function') {
-                onError(error);
+    try {
+        chrome.storage.local.get(keys, (result) => {
+            const error = chrome.runtime.lastError;
+            if (error) {
+                console.error('Failed to access extension storage:', error);
+                setStorageErrorBadge();
+                recordLastError(error.message || 'Storage read failed');
+                if (typeof onError === 'function') {
+                    onError(error);
+                }
+                return;
             }
+
+            clearStorageErrorBadge();
+            onSuccess(result);
+        });
+    } catch (error) {
+        console.error('Unexpected storage access failure:', error);
+        setStorageErrorBadge();
+        recordLastError(error.message || 'Storage exception');
+        if (typeof onError === 'function') {
+            onError(error);
+        }
+    }
+}
+
+function safeStorageSet(values, onSuccess, onError) {
+    try {
+        chrome.storage.local.set(values, () => {
+            const error = chrome.runtime.lastError;
+            if (error) {
+                console.error('Failed to persist extension storage:', error);
+                setStorageErrorBadge();
+                recordLastError(error.message || 'Storage write failed');
+                if (typeof onError === 'function') {
+                    onError(error);
+                }
+                return;
+            }
+
+            clearStorageErrorBadge();
+            if (typeof onSuccess === 'function') {
+                onSuccess();
+            }
+        });
+    } catch (error) {
+        console.error('Unexpected storage write failure:', error);
+        setStorageErrorBadge();
+        recordLastError(error.message || 'Storage exception');
+        if (typeof onError === 'function') {
+            onError(error);
+        }
+    }
+}
+
+function readDebugFlag() {
+    safeStorageGet(['debug_enabled'], (result) => {
+        debugEnabled = Boolean(result && result.debug_enabled);
+        debugLog('debug:flag:init', { enabled: debugEnabled });
+    });
+}
+
+function handleStorageChanges(changes, areaName) {
+    if (areaName !== 'local' || !changes) {
+        return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(changes, 'debug_enabled')) {
+        debugEnabled = Boolean(changes.debug_enabled.newValue);
+        debugLog('debug:flag:update', { enabled: debugEnabled });
+    }
+}
+
+readDebugFlag();
+if (chrome.storage && typeof chrome.storage.onChanged?.addListener === 'function') {
+    chrome.storage.onChanged.addListener(handleStorageChanges);
+}
+
+function getActiveTabSafe() {
+    return new Promise((resolve) => {
+        try {
+            chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+                const error = chrome.runtime.lastError;
+                if (error) {
+                    debugLog('tabs.query:error', { message: error.message });
+                    resolve(null);
+                    return;
+                }
+
+                if (Array.isArray(tabs) && tabs.length > 0) {
+                    resolve(tabs[0]);
+                } else {
+                    resolve(null);
+                }
+            });
+        } catch (error) {
+            debugLog('tabs.query:exception', { message: error.message });
+            resolve(null);
+        }
+    });
+}
+
+function isNoReceiverError(message) {
+    if (typeof message !== 'string') {
+        return false;
+    }
+    return message.includes('Receiving end does not exist') ||
+        message.includes('Could not establish connection') ||
+        message.includes('No tab with id');
+}
+
+function sendToTabSafe(tabId, payload, options = {}) {
+    const fallbackTitle = typeof options.fallbackTitle === 'string' ? options.fallbackTitle : FALLBACK_BADGE_TITLE;
+
+    return new Promise((resolve) => {
+        if (typeof tabId !== 'number') {
+            debugLog('sendToTabSafe:invalidTab', { tabId });
+            showNoContentScriptFallback(fallbackTitle);
+            resolve({ ok: false, reason: 'invalid-tab' });
             return;
         }
 
-        clearStorageErrorBadge();
-        onSuccess(result);
+        try {
+            chrome.tabs.sendMessage(tabId, payload, undefined, (response) => {
+                const error = chrome.runtime.lastError;
+                if (error) {
+                    const message = error.message || 'Failed to deliver message';
+                    debugLog('tabs.sendMessage:error', { tabId, message });
+                    if (isNoReceiverError(message)) {
+                        showNoContentScriptFallback(fallbackTitle);
+                    }
+                    recordLastError(message);
+                    resolve({ ok: false, reason: 'send-error', error: message, response });
+                    return;
+                }
+
+                clearActionBadgeFallback();
+                resolve({ ok: true, response });
+            });
+        } catch (error) {
+            debugLog('tabs.sendMessage:exception', { tabId, message: error.message });
+            showNoContentScriptFallback(fallbackTitle);
+            recordLastError(error.message || 'sendMessage exception');
+            resolve({ ok: false, reason: 'exception', error: error.message });
+        }
     });
 }
 
 // Function to proofread selected text using OpenAI GPT-3.5 Turbo
-function proofreadText(selectedText, tabId, options = {}) {
-    console.log("Sending text to GPT for proofreading...");
+async function proofreadText(selectedText, tabId, options = {}) {
+    debugLog('proofread:start', { tabId, source: options.source || 'unknown' });
 
     const { notifyErrors = true } = options;
 
-    return new Promise((resolve, reject) => {
-        safeStorageGet(['openai_api_key', 'tone_preference'], function (result) {
-            const apiKey = result.openai_api_key;
-            const tonePreference = result.tone_preference || 'Neutral';
-            const toneInstruction = tonePreference.toLowerCase();
-
-            if (!apiKey) {
-                console.error("No API Key found.");
-                const error = new Error("No API Key found. Please set your API Key in the extension settings.");
-                if (notifyErrors) {
-                    showErrorMessage(error.message);
-                }
-                reject(error);
-                return;
-            }
-
-            attemptProofread(selectedText, apiKey, toneInstruction)
-                .then(proofreadVersion => {
-                    if (!proofreadVersion) {
-                        const error = new Error('Failed to proofread the text. Please try again.');
-                        if (notifyErrors) {
-                            showErrorMessage(error.message);
-                        }
-                        reject(error);
-                        return;
-                    }
-
-                    replaceSelectedText(tabId, selectedText, proofreadVersion);
-                    resolve(proofreadVersion);
-                })
-                .catch(error => {
-                    console.error("Error in proofreadText function: ", error);
-                    const message = error && error.message ? error.message : "Failed to proofread the text. Please try again.";
-                    if (notifyErrors) {
-                        showErrorMessage(message);
-                    }
-                    reject(error instanceof Error ? error : new Error(message));
-                });
-        }, () => {
-            const error = new Error('Failed to read your extension settings. Please try again.');
-            if (notifyErrors) {
-                showErrorMessage(error.message);
-            }
-            reject(error);
+    try {
+        const result = await new Promise((resolve, reject) => {
+            safeStorageGet(['openai_api_key', 'tone_preference'], resolve, reject);
         });
-    });
+
+        const apiKey = result.openai_api_key;
+        const tonePreference = result.tone_preference || 'Neutral';
+        const toneInstruction = tonePreference.toLowerCase();
+
+        if (!apiKey) {
+            const error = new Error("No API Key found. Please set your API Key in the extension settings.");
+            if (notifyErrors) {
+                await awaitShowErrorMessage(error.message);
+            }
+            recordLastError(error.message);
+            throw error;
+        }
+
+        const proofreadVersion = await attemptProofread(selectedText, apiKey, toneInstruction);
+        if (!proofreadVersion) {
+            const error = new Error('Failed to proofread the text. Please try again.');
+            if (notifyErrors) {
+                await awaitShowErrorMessage(error.message);
+            }
+            recordLastError(error.message);
+            throw error;
+        }
+
+        const replacementResult = await replaceSelectedText(tabId, selectedText, proofreadVersion);
+        if (!replacementResult.ok) {
+            const errorMessage = replacementResult.message || 'Unable to update the selected text.';
+            if (notifyErrors) {
+                await awaitShowErrorMessage(errorMessage);
+            }
+            recordLastError(errorMessage);
+            throw new Error(errorMessage);
+        }
+
+        debugLog('proofread:ok', { tabId });
+        return proofreadVersion;
+    } catch (error) {
+        const message = error && error.message ? error.message : 'Failed to proofread the text. Please try again.';
+        debugLog('proofread:error', { tabId, message });
+        if (notifyErrors) {
+            await awaitShowErrorMessage(message);
+        }
+        throw error instanceof Error ? error : new Error(message);
+    }
 }
 
 async function attemptProofread(selectedText, apiKey, toneInstruction, attempt = 0) {
@@ -157,12 +386,13 @@ async function attemptProofread(selectedText, apiKey, toneInstruction, attempt =
         }
 
         const proofreadText = data.choices[0].message.content;
-        console.log("Proofread text: ", proofreadText);
+        debugLog('proofread:response', { attempt, tabTextLength: selectedText.length });
         return proofreadText;
     } catch (error) {
         if (error.name === 'AbortError') {
             throw new Error("The proofreading request timed out. Please try again.");
         }
+        debugLog('proofread:fetchError', { attempt, message: error.message });
         throw error;
     } finally {
         clearTimeout(timeout);
@@ -174,46 +404,79 @@ function showErrorMessage(message) {
     alert(message);
 }
 
-// Function to replace the selected text with proofread text
-function replaceSelectedText(tabId, originalText, newText) {
-    if (typeof tabId !== 'number') {
-        console.warn('No valid tabId provided for text replacement.');
-        return;
+async function awaitShowErrorMessage(message) {
+    debugLog('toast:fallback', { message });
+    const activeTab = await getActiveTabSafe();
+    if (activeTab && typeof activeTab.id === 'number') {
+        const response = await sendToTabSafe(activeTab.id, { message });
+        if (response.ok) {
+            return;
+        }
     }
 
-    chrome.tabs.sendMessage(tabId, {
+    showNoContentScriptFallback();
+}
+
+// Function to replace the selected text with proofread text
+async function replaceSelectedText(tabId, originalText, newText) {
+    if (typeof tabId !== 'number') {
+        debugLog('replaceSelectedText:invalidTab', { tabId });
+        return { ok: false, message: 'Unable to locate the original tab.' };
+    }
+
+    const response = await sendToTabSafe(tabId, {
         type: 'gptProofreadResult',
         proofreadText: newText,
         originalText
-    }, undefined, () => {
-        const error = chrome.runtime.lastError;
-        if (error) {
-            console.warn('Failed to send proofread result to content script:', error.message);
-        }
     });
+
+    if (!response.ok) {
+        return { ok: false, message: 'Unable to deliver proofread text to the page.' };
+    }
+
+    return { ok: true };
 }
 
 // Add context menu item for proofreading
 chrome.runtime.onInstalled.addListener(function () {
-    chrome.contextMenus.create({
-        id: "proofreadGPT",
-        title: "Proofread with GPT",
-        contexts: ["selection"]
-    });
+    try {
+        chrome.contextMenus.create({
+            id: "proofreadGPT",
+            title: "Proofread with GPT",
+            contexts: ["selection"]
+        }, () => {
+            const error = chrome.runtime.lastError;
+            if (error) {
+                debugLog('contextMenus.create:error', { message: error.message });
+            }
+        });
+    } catch (error) {
+        debugLog('contextMenus.create:exception', { message: error.message });
+    }
 });
 
 // Listener for context menu clicks
 chrome.contextMenus.onClicked.addListener(function (info, tab) {
-    if (info.menuItemId === "proofreadGPT") {
-        const selectedText = info.selectionText;
-        console.log("Context menu clicked. Selected text: ", selectedText);
-        proofreadText(selectedText, tab.id, { notifyErrors: false })
-            .catch(error => {
-                const message = error && error.message ? error.message : 'Failed to proofread the text. Please try again.';
-                console.error('Context menu proofreading failed:', error);
-                showErrorMessage(message);
-            });
+    if (info.menuItemId !== "proofreadGPT") {
+        return;
     }
+
+    const selectedText = typeof info.selectionText === 'string' ? info.selectionText : '';
+    const tabId = tab && typeof tab.id === 'number' ? tab.id : undefined;
+
+    if (!selectedText.trim()) {
+        awaitShowErrorMessage('Please select some text to proofread.');
+        return;
+    }
+
+    debugLog('contextMenu:invoke', { tabId });
+
+    proofreadText(selectedText, tabId, { notifyErrors: false, source: 'context-menu' })
+        .catch(error => {
+            const message = error && error.message ? error.message : 'Failed to proofread the text. Please try again.';
+            console.error('Context menu proofreading failed:', error);
+            awaitShowErrorMessage(message);
+        });
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -243,7 +506,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return;
         }
 
-        proofreadText(selectedText, tabId, { notifyErrors: false })
+        proofreadText(selectedText, tabId, { notifyErrors: false, source: 'popup' })
             .then(() => {
                 if (typeof sendResponse === 'function') {
                     sendResponse({ ok: true });
@@ -257,5 +520,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
 
         return true;
+    }
+
+    if (request.type === 'gptProofreaderPing') {
+        if (typeof sendResponse === 'function') {
+            sendResponse({ ok: true });
+        }
+        return;
     }
 });

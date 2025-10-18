@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proofreader Debug Console</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            margin: 24px;
+            color: #1f1f1f;
+            line-height: 1.5;
+            max-width: 720px;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 16px;
+        }
+
+        h2 {
+            font-size: 18px;
+            margin-top: 24px;
+            margin-bottom: 8px;
+        }
+
+        section {
+            border: 1px solid #d0d7de;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            background: #f9fafb;
+        }
+
+        dl {
+            display: grid;
+            grid-template-columns: minmax(160px, auto) 1fr;
+            gap: 8px 16px;
+            margin: 0;
+        }
+
+        dt {
+            font-weight: 600;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 12px;
+            font-family: monospace;
+            border-radius: 6px;
+            border: 1px solid #c9d1d9;
+        }
+
+        button {
+            margin-top: 12px;
+            padding: 8px 14px;
+            border-radius: 6px;
+            border: none;
+            background-color: #0b5fff;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        button.secondary {
+            background-color: #6c757d;
+        }
+
+        .status {
+            margin-top: 12px;
+            font-size: 14px;
+        }
+
+        .status.ok {
+            color: #137333;
+        }
+
+        .status.err {
+            color: #d93025;
+        }
+
+        .status.pending {
+            color: #ea8600;
+        }
+    </style>
+</head>
+<body>
+    <h1>Proofreader Debug Console</h1>
+
+    <section>
+        <h2>Storage snapshot</h2>
+        <dl>
+            <dt>API key</dt>
+            <dd id="apiKeyDisplay">Loading…</dd>
+            <dt>Tone</dt>
+            <dd id="toneDisplay">Loading…</dd>
+            <dt>Debug flag</dt>
+            <dd id="debugFlagDisplay">Loading…</dd>
+            <dt>Last error</dt>
+            <dd id="lastErrorDisplay">Loading…</dd>
+        </dl>
+        <button id="refreshStorage" class="secondary">Refresh</button>
+    </section>
+
+    <section>
+        <h2>Content script ping</h2>
+        <p>Checks whether the active tab currently has the proofreader content script attached.</p>
+        <button id="pingButton">Ping active tab</button>
+        <div id="pingStatus" class="status"></div>
+    </section>
+
+    <section>
+        <h2>Run self-test</h2>
+        <p>This test replaces the highlighted text below using the same logic the content script uses.</p>
+        <textarea id="selfTestInput">The quick borwn fox jumps over the lazi dog.</textarea>
+        <button id="selfTestButton">Run self-test</button>
+        <div id="selfTestStatus" class="status"></div>
+    </section>
+
+    <script src="debug.js"></script>
+</body>
+</html>
