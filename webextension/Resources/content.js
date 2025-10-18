@@ -63,6 +63,38 @@ function showToast(message) {
     }, TOAST_LIFETIME_MS);
 }
 
+function getActiveElementSelection() {
+    const activeElement = document.activeElement;
+
+    if (activeElement && typeof activeElement.value === 'string' && typeof activeElement.selectionStart === 'number' && typeof activeElement.selectionEnd === 'number') {
+        const start = activeElement.selectionStart;
+        const end = activeElement.selectionEnd;
+
+        if (end > start) {
+            return activeElement.value.slice(start, end);
+        }
+    }
+
+    return null;
+}
+
+function getCurrentSelectionText() {
+    const inputSelection = getActiveElementSelection();
+    if (typeof inputSelection === 'string') {
+        return inputSelection;
+    }
+
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+        const text = selection.toString();
+        if (text) {
+            return text;
+        }
+    }
+
+    return '';
+}
+
 function replaceSelectionWithText(replacementText, originalText) {
     const activeElement = document.activeElement;
 
@@ -103,7 +135,7 @@ function replaceSelectionWithText(replacementText, originalText) {
     return false;
 }
 
-chrome.runtime.onMessage.addListener((request) => {
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (!request) {
         return;
     }
@@ -113,6 +145,12 @@ chrome.runtime.onMessage.addListener((request) => {
         if (!replaced) {
             showToast('Unable to replace the previously selected text. Please try again.');
         }
+        return;
+    }
+
+    if (request.type === 'gptProofreadSelectionRequest') {
+        const text = getCurrentSelectionText();
+        sendResponse({ text });
         return;
     }
 
