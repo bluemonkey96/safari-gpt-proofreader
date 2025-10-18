@@ -207,7 +207,12 @@ chrome.contextMenus.onClicked.addListener(function (info, tab) {
     if (info.menuItemId === "proofreadGPT") {
         const selectedText = info.selectionText;
         console.log("Context menu clicked. Selected text: ", selectedText);
-        proofreadText(selectedText, tab.id);
+        proofreadText(selectedText, tab.id, { notifyErrors: false })
+            .catch(error => {
+                const message = error && error.message ? error.message : 'Failed to proofread the text. Please try again.';
+                console.error('Context menu proofreading failed:', error);
+                showErrorMessage(message);
+            });
     }
 });
 
